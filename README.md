@@ -1,2 +1,2 @@
 # postfix
-Full Featured Postix Server
+Docker Image for Full Featured Postfix Server
