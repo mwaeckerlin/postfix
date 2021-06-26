@@ -17,6 +17,7 @@ RUN postconf -e 'local_transport_maps = $virtual_mailbox_maps'
 RUN postconf -e 'smtputf8_enable = no'
 RUN postconf -e 'virtual_transport=lmtp:inet:dovecot'
 RUN postconf -e 'mailbox_transport=lmtp:inet:dovecot'
+RUN postconf -e 'smtpd_sasl_auth_enable = yes'
 COPY --chown=root:postfix \
     mysql_virtual_alias_domain_catchall_maps.cf \
     mysql_virtual_alias_domain_mailbox_maps.cf \
