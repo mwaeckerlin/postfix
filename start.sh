@@ -17,20 +17,6 @@ if test -e /etc/letsencrypt/live/${HOSTNAME:-$DOMAIN}/fullchain.pem \
     echo "**** TLS configured for ${HOSTNAME:-$DOMAIN}}"
 fi
 
-cat <<EOF >/etc/sasl2/smtpd.conf
-pwcheck_method: auxprop
-auxprop_plugin: sql
-mech_list: PLAIN LOGIN CRAM-MD5 DIGEST-MD5 NTLM
-sql_engine: mysql
-sql_hostnames: ${DB_HOST}
-sql_user: ${DB_USER}
-sql_passwd: ${DB_PASSWORD}
-sql_database: ${DB_NAME}
-sql_select: SELECT password FROM users WHERE user = '%u@%r'
-EOF
-chown postfix /etc/sasl2/smtpd.conf
-chmod go= /etc/sasl2/smtpd.conf
-
 SQL_CONFIGS="
     /etc/postfix/sql/mysql_virtual_alias_domain_catchall_maps.cf
     /etc/postfix/sql/mysql_virtual_alias_domain_mailbox_maps.cf
