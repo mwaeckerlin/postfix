@@ -17,19 +17,32 @@ RUN postconf -e 'smtputf8_enable = no'
 RUN postconf -e 'virtual_transport=lmtp:inet:dovecot'
 RUN postconf -e 'mailbox_transport=lmtp:inet:dovecot'
 
+# debugging
+RUN postconf -e 'debug_peer_list=192.168.80.1'
+RUN postconf -e 'smtpd_tls_loglevel = 2'
+RUN postconf -e 'lmtp_tls_loglevel = 2'
+RUN postconf -e 'smtp_tls_loglevel = 2'
+
 # SASL
-RUN postconf -e 'smtp_sasl_auth_enable = yes'
+RUN postconf -e 'broken_sasl_auth_clients = yes'
+#RUN postconf -e 'smtp_sasl_auth_enable = yes'
+#RUN postconf -e 'smtp_sasl_path = inet:dovecot:12345'
+#RUN postconf -e 'smtp_sasl_type = dovecot'
+#RUN postconf -e 'smtp_use_tls = no'
+#RUN postconf -e 'smtp_sasl_security_options = noanonymous'
+RUN postconf -e 'smtpd_sasl_auth_enable = yes'
 RUN postconf -e 'smtpd_sasl_path = inet:dovecot:12345'
 RUN postconf -e 'smtpd_sasl_type = dovecot'
-#RUN postconf -e 'debug_peer_list=192.168.80.1'
+RUN postconf -e 'smtpd_use_tls = no'
+RUN postconf -e 'smtpd_sasl_security_options = noanonymous'
 
 # antispam
 RUN postconf -e 'smtpd_hard_error_limit = 1'
 RUN postconf -e 'smtpd_helo_required = yes'
 RUN postconf -e 'smtpd_helo_restrictions = permit_sasl_authenticated, permit_mynetworks, reject_invalid_hostname, reject_non_fqdn_hostname, reject_unauth_pipelining'
-RUN postconf -e 'smtpd_sender_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_non_fqdn_sender, reject_unauth_pipelining'
+RUN postconf -e 'smtpd_sender_restrictions = permit_sasl_authenticated, permit_mynetworks, reject_non_fqdn_sender, reject_unauth_pipelining'
 RUN postconf -e 'smtpd_recipient_restrictions = permit_sasl_authenticated, permit_mynetworks, reject_unknown_recipient_domain, reject_non_fqdn_recipient, reject_unauth_pipelining, reject_rbl_client ix.dnsbl.manitu.net, reject_rbl_client sbl.spamhaus.org, reject_rbl_client xbl.spamhaus.org, check_policy_service inet:127.0.0.1:10023'
-RUN postconf -e 'smtpd_client_restrictions = reject_invalid_hostname, reject_rhsbl_sender dbl.spamhaus.org, reject_rhsbl_client dbl.spamhaus.org, reject_rhsbl_helo dbl.spamhaus.org'
+RUN postconf -e 'smtpd_client_restrictions = permit_sasl_authenticated, reject_invalid_hostname, reject_rhsbl_sender dbl.spamhaus.org, reject_rhsbl_client dbl.spamhaus.org, reject_rhsbl_helo dbl.spamhaus.org'
 RUN postconf -e 'smtpd_relay_restrictions = permit_sasl_authenticated, reject_unknown_recipient_domain, reject_non_fqdn_recipient, reject_unauth_pipelining, reject_unauth_destination, reject_rbl_client ix.dnsbl.manitu.net, reject_rbl_client sbl.spamhaus.org, reject_rbl_client xbl.spamhaus.org'
 
 COPY --chown=root:postfix \
