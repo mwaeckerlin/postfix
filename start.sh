@@ -14,7 +14,7 @@ if test -e /etc/letsencrypt/live/${HOSTNAME:-$DOMAIN}/fullchain.pem \
     postconf -e smtpd_tls_key_file=/etc/letsencrypt/live/${HOSTNAME:-$DOMAIN}/privkey.pem
     postconf -e smtpd_use_tls=yes
     postconf -e smtpd_tls_security_level=may
-    echo "**** TLS configured for ${DOMAIN:-$DOMAIN}}"
+    echo "**** TLS configured for ${HOSTNAME:-$DOMAIN}}"
 fi
 
 SQL_CONFIGS="
