@@ -8,13 +8,13 @@ if test -n "${GREYLIST}" && ! postconf smtpd_client_restrictions | grep -q "inet
 fi
 
 # check if letsencrypt certificates exist
-if test -e /etc/letsencrypt/live/${HOSTNAME:-DOMAIN}/fullchain.pem \
-    -a -e /etc/letsencrypt/live/${HOSTNAME:-DOMAIN}/privkey.pem; then
-    postconf -e smtpd_tls_cert_file=/etc/letsencrypt/live/${HOSTNAME:-DOMAIN}/fullchain.pem
-    postconf -e smtpd_tls_key_file=/etc/letsencrypt/live/${HOSTNAME:-DOMAIN}/privkey.pem
+if test -e /etc/letsencrypt/live/${HOSTNAME:-$DOMAIN}/fullchain.pem \
+    -a -e /etc/letsencrypt/live/${HOSTNAME:-$DOMAIN}/privkey.pem; then
+    postconf -e smtpd_tls_cert_file=/etc/letsencrypt/live/${HOSTNAME:-$DOMAIN}/fullchain.pem
+    postconf -e smtpd_tls_key_file=/etc/letsencrypt/live/${HOSTNAME:-$DOMAIN}/privkey.pem
     postconf -e smtpd_use_tls=yes
     postconf -e smtpd_tls_security_level=may
-    echo "**** TLS configured for ${DOMAIN:-DOMAIN}}"
+    echo "**** TLS configured for ${DOMAIN:-$DOMAIN}}"
 fi
 
 SQL_CONFIGS="
@@ -38,7 +38,7 @@ for f in $SQL_CONFIGS; do
     sed -i '/^query/{hd};${pg}' $f
 done
 
-postconf -e "myhostname=${HOSTNAME:-DOMAIN}"
+postconf -e "myhostname=${HOSTNAME:-$DOMAIN}"
 postconf -e "mydomain=${DOMAIN}"
 #postconf -e "mydestination=$LOCAL_DOMAINS"
 
