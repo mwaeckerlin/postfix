@@ -36,6 +36,9 @@ RUN postconf -e 'smtpd_sasl_type = dovecot'
 RUN postconf -e 'smtpd_use_tls = no'
 RUN postconf -e 'smtpd_sasl_security_options = noanonymous'
 
+# Message size 1GB
+RUN postconf -e message_size_limit = 1073741824
+
 # antispam
 RUN postconf -e 'smtpd_hard_error_limit = 1'
 RUN postconf -e 'smtpd_helo_required = yes'
