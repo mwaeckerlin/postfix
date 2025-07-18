@@ -17,7 +17,7 @@ if test -e /etc/letsencrypt/live/${HOSTROOT:-${HOSTNAME:-$DOMAIN}}/fullchain.pem
     postconf -e "smtpd_tls_auth_only = yes"
     postconf -e "smtpd_use_tls = yes"
     postconf -e "smtp_tls_note_starttls_offer = yes"
-    echo "**** TLS configured for ${HOSTNAME:-$DOMAIN}}"
+    echo "**** TLS configured for ${HOSTNAME:-$DOMAIN}} on /etc/letsencrypt/live/${HOSTROOT:-${HOSTNAME:-$DOMAIN}}"
 fi
 
 SQL_CONFIGS="
