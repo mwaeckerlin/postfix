@@ -8,10 +8,10 @@ if test -n "${GREYLIST}" && ! postconf smtpd_client_restrictions | grep -q "inet
 fi
 
 # check if letsencrypt certificates exist
-if test -e /etc/letsencrypt/live/${HOSTNAME:-$DOMAIN}/fullchain.pem \
-    -a -e /etc/letsencrypt/live/${HOSTNAME:-$DOMAIN}/privkey.pem; then
-    postconf -e "smtpd_tls_cert_file=/etc/letsencrypt/live/${HOSTNAME:-$DOMAIN}/fullchain.pem"
-    postconf -e "smtpd_tls_key_file=/etc/letsencrypt/live/${HOSTNAME:-$DOMAIN}/privkey.pem"
+if test -e /etc/letsencrypt/live/${HOSTROOT:-${HOSTNAME:-$DOMAIN}}/fullchain.pem \
+    -a -e /etc/letsencrypt/live/${HOSTROOT:-${HOSTNAME:-$DOMAIN}}/privkey.pem; then
+    postconf -e "smtpd_tls_cert_file=/etc/letsencrypt/live/${HOSTROOT:-${HOSTNAME:-$DOMAIN}}/fullchain.pem"
+    postconf -e "smtpd_tls_key_file=/etc/letsencrypt/live/${HOSTROOT:-${HOSTNAME:-$DOMAIN}}/privkey.pem"
     postconf -e "smtpd_use_tls=yes"
     postconf -e "smtpd_tls_security_level=may"
     postconf -e "smtpd_tls_auth_only = yes"
