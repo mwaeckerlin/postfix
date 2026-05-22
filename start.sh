@@ -1,9 +1,15 @@
-/bin/sh -e
+#!/bin/bash -e
 
-# greylist filter use GREYLIST=host:port or --link greylist-container:postgrey
-if test -n "${GREYLIST}" && ! postconf smtpd_client_restrictions | grep -q "inet:${GREYLIST}:10023"; then
-    postconf -e "$(postconf smtpd_client_restrictions), check_policy_service inet:${GREYLIST}:10023"
-    echo "**** Greylisting configured to use ${GREYLIST}:10023"
+# greylisting milter use GREYLIST=host:port or GREYLIST=host (default port)
+if [[ -n "${GREYLIST}" && "${GREYLIST}" != *:* ]]; then
+    GREYLIST="${GREYLIST}:10025"
+fi
+if [[ -n "${GREYLIST}" && ! "$(postconf smtpd_milters)" =~ "inet:${GREYLIST}" ]]; then
+    postconf -e "smtpd_milters=inet:${GREYLIST}"
+    postconf -e "non_smtpd_milters=inet:${GREYLIST}"
+    postconf -e "milter_default_action=accept"
+    postconf -e "milter_protocol=6"
+    echo "**** Greylisting milter configured to use ${GREYLIST}"
 
 fi
 
