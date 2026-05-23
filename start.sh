@@ -53,4 +53,9 @@ postconf -e "myhostname=${HOSTNAME:-$DOMAIN}"
 postconf -e "mydomain=${DOMAIN}"
 #postconf -e "mydestination=$LOCAL_DOMAINS"
 
+if [[ -n "${RELAYHOST}" ]]; then
+    postconf -e "relayhost=[${RELAYHOST}]"
+    echo "**** All outbound mail relayed through ${RELAYHOST}"
+fi
+
 /usr/sbin/postfix start-fg
