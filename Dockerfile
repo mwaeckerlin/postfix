@@ -1,5 +1,7 @@
 FROM mwaeckerlin/mailforward as build
-RUN $PKG_INSTALL postfix postfix-mysql postfix-pcre
+RUN $PKG_INSTALL postfix postfix-mysql postfix-pcre postfix-policyd-spf-perl
+RUN printf '\npolicy-spf  unix  -       n       n       -       -       spawn\n    user=nobody argv=/usr/bin/postfix-policyd-spf-perl\n' \
+    >> /etc/postfix/master.cf
 RUN addgroup -g 5000 login-user
 RUN adduser -H -D -u 5000 -G login-user login-user
 RUN mkdir -p /var/mail/domains
@@ -70,6 +72,9 @@ ENV HOSTROOT      ""
 ENV HOSTNAME      ""
 ENV DOMAIN        ""
 ENV LOCAL_DOMAINS ""
+ENV OPENDKIM      ""
+ENV CHECK_SPF     "yes"
+ENV MYNETWORKS    ""
 USER root
 CMD /start.sh
 VOLUME /var/mail/domains
