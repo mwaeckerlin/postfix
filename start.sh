@@ -21,33 +21,15 @@ _add_milter() {
     postconf -e "milter_protocol=6"
 }
 
-# Greylisting milter: GREYLIST=host:port or GREYLIST=host (default port 10025)
-if [ -n "${GREYLIST}" ] && [ "${GREYLIST}" = "${GREYLIST%:*}" ]; then
-    GREYLIST="${GREYLIST}:10025"
+# Rspamd milter — one single upstream that covers DKIM signing + DKIM
+# verify + DMARC + SPF + greylist + Bayes-based spam scoring + ClamAV.
+# RSPAMD=host or RSPAMD=host:port (default port 11332).
+if [ -n "${RSPAMD}" ] && [ "${RSPAMD}" = "${RSPAMD%:*}" ]; then
+    RSPAMD="${RSPAMD}:11332"
 fi
-if [ -n "${GREYLIST}" ]; then
-    _add_milter "${GREYLIST}"
-    echo "**** Greylisting milter configured: ${GREYLIST}"
-fi
-
-# DKIM milter: OPENDKIM=host:port or OPENDKIM=host (default port 10026)
-if [ -n "${OPENDKIM}" ] && [ "${OPENDKIM}" = "${OPENDKIM%:*}" ]; then
-    OPENDKIM="${OPENDKIM}:10026"
-fi
-if [ -n "${OPENDKIM}" ]; then
-    _add_milter "${OPENDKIM}"
-    echo "**** OpenDKIM milter configured: ${OPENDKIM}"
-fi
-
-# DMARC milter: OPENDMARC=host:port or OPENDMARC=host (default port 8893).
-# Added AFTER opendkim so opendmarc can consume opendkim's
-# `Authentication-Results: … dkim=…` header when deciding DMARC alignment.
-if [ -n "${OPENDMARC}" ] && [ "${OPENDMARC}" = "${OPENDMARC%:*}" ]; then
-    OPENDMARC="${OPENDMARC}:8893"
-fi
-if [ -n "${OPENDMARC}" ]; then
-    _add_milter "${OPENDMARC}"
-    echo "**** OpenDMARC milter configured: ${OPENDMARC}"
+if [ -n "${RSPAMD}" ]; then
+    _add_milter "${RSPAMD}"
+    echo "**** Rspamd milter configured: ${RSPAMD}"
 fi
 
 # check if letsencrypt certificates exist
@@ -95,7 +77,13 @@ if [ -n "${DISABLE_DNSBL}" ]; then
     echo "**** DNSBL/RBL checks disabled"
 fi
 
-# SPF policy check on incoming mail (disabled by setting CHECK_SPF=no)
+# SPF policy check on incoming mail (disabled by setting CHECK_SPF=no).
+# When RSPAMD is configured, rspamd's SPF module handles this — running
+# policyd-spf in parallel duplicates the work and can produce
+# contradictory verdicts. Auto-disable in that case.
+if [ -n "${RSPAMD}" ] && [ -z "${CHECK_SPF+set}" ]; then
+    CHECK_SPF="no"
+fi
 if [ "${CHECK_SPF}" != "no" ] && command -v postfix-policyd-spf-perl >/dev/null 2>&1; then
     if ! postconf smtpd_recipient_restrictions | grep -q "policy-spf"; then
         cur=$(postconf -h smtpd_recipient_restrictions 2>/dev/null)
