@@ -39,6 +39,17 @@ if [ -n "${OPENDKIM}" ]; then
     echo "**** OpenDKIM milter configured: ${OPENDKIM}"
 fi
 
+# DMARC milter: OPENDMARC=host:port or OPENDMARC=host (default port 8893).
+# Added AFTER opendkim so opendmarc can consume opendkim's
+# `Authentication-Results: … dkim=…` header when deciding DMARC alignment.
+if [ -n "${OPENDMARC}" ] && [ "${OPENDMARC}" = "${OPENDMARC%:*}" ]; then
+    OPENDMARC="${OPENDMARC}:8893"
+fi
+if [ -n "${OPENDMARC}" ]; then
+    _add_milter "${OPENDMARC}"
+    echo "**** OpenDMARC milter configured: ${OPENDMARC}"
+fi
+
 # check if letsencrypt certificates exist
 if test -e /etc/letsencrypt/live/${HOSTROOT:-${HOSTNAME:-$DOMAIN}}/fullchain.pem \
     -a -e /etc/letsencrypt/live/${HOSTROOT:-${HOSTNAME:-$DOMAIN}}/privkey.pem; then

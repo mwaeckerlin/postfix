@@ -73,6 +73,7 @@ ENV HOSTNAME      ""
 ENV DOMAIN        ""
 ENV LOCAL_DOMAINS ""
 ENV OPENDKIM      ""
+ENV OPENDMARC     ""
 ENV CHECK_SPF     "yes"
 ENV MYNETWORKS    ""
 USER root
