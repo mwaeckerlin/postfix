@@ -76,8 +76,9 @@ ENV RSPAMD        ""
 ENV CHECK_SPF     "yes"
 ENV MYNETWORKS    ""
 # Delivery-affecting limits — high, configurable defaults (see start.sh).
-# MESSAGE_SIZE_LIMIT in bytes (0 = unlimited); default 1 GiB.
-ENV MESSAGE_SIZE_LIMIT    "1073741824"
+# MESSAGE_SIZE_LIMIT in bytes (0 = unlimited); default 100 GiB so even
+# several photos/videos in one mail are accepted.
+ENV MESSAGE_SIZE_LIMIT    "107374182400"
 ENV SMTP_HARD_ERROR_LIMIT "20"
 USER root
 CMD /start.sh

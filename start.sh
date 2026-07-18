@@ -104,13 +104,23 @@ postconf -e "mydomain=${DOMAIN}"
 # Delivery-affecting limits — kept very high and configurable so a
 # legitimate mail is never bounced by an artificial default.
 #   MESSAGE_SIZE_LIMIT: max accepted message size in bytes; a larger
-#     mail is rejected with 552. Default 1 GiB (very generous — most
-#     providers cap at 25–50 MB). Set to 0 for NO limit.
-#   SMTP_HARD_ERROR_LIMIT: after this many protocol errors in one
-#     session postfix disconnects. Postfix default is 20; we keep that
-#     (a legitimate client sending clean SMTP never hits it). A very
-#     low value would turn a single hiccup into an abrupt 421.
-postconf -e "message_size_limit=${MESSAGE_SIZE_LIMIT:-1073741824}"
+#     mail is rejected with 552. Default 100 GiB — deliberately huge so
+#     even several photos/videos in one mail pass. Set to 0 for NO limit.
+#   mailbox_size_limit is pinned to the same value so postfix does not
+#     warn (it wants mailbox_size_limit >= message_size_limit) and so
+#     nothing caps delivery. Actual per-user quota is enforced by
+#     dovecot over LMTP, not here.
+#   SMTP_HARD_ERROR_LIMIT: after this many *hard* SMTP protocol errors
+#     in one session postfix drops the connection. Hard errors are
+#     malformed/out-of-sequence commands and commands that draw a 5xx
+#     (unknown recipient, policy reject, …). Postfix's standard default
+#     is 20 and we keep it: a legitimate client sending clean SMTP never
+#     hits it, and a legit server delivering to several recipients where
+#     one is invalid would be cut off by a very low value. Lower it
+#     (e.g. 5–10) for stricter anti-spam if you accept that risk; the
+#     previous hardcoded 1 turned a single 5xx into an abrupt 421.
+postconf -e "message_size_limit=${MESSAGE_SIZE_LIMIT:-107374182400}"
+postconf -e "mailbox_size_limit=${MESSAGE_SIZE_LIMIT:-107374182400}"
 postconf -e "smtpd_hard_error_limit=${SMTP_HARD_ERROR_LIMIT:-20}"
 echo "**** message_size_limit=$(postconf -h message_size_limit), smtpd_hard_error_limit=$(postconf -h smtpd_hard_error_limit)"
 
