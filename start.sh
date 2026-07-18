@@ -101,6 +101,19 @@ postconf -e "myhostname=${HOSTNAME:-$DOMAIN}"
 postconf -e "mydomain=${DOMAIN}"
 #postconf -e "mydestination=$LOCAL_DOMAINS"
 
+# Delivery-affecting limits — kept very high and configurable so a
+# legitimate mail is never bounced by an artificial default.
+#   MESSAGE_SIZE_LIMIT: max accepted message size in bytes; a larger
+#     mail is rejected with 552. Default 1 GiB (very generous — most
+#     providers cap at 25–50 MB). Set to 0 for NO limit.
+#   SMTP_HARD_ERROR_LIMIT: after this many protocol errors in one
+#     session postfix disconnects. Postfix default is 20; we keep that
+#     (a legitimate client sending clean SMTP never hits it). A very
+#     low value would turn a single hiccup into an abrupt 421.
+postconf -e "message_size_limit=${MESSAGE_SIZE_LIMIT:-1073741824}"
+postconf -e "smtpd_hard_error_limit=${SMTP_HARD_ERROR_LIMIT:-20}"
+echo "**** message_size_limit=$(postconf -h message_size_limit), smtpd_hard_error_limit=$(postconf -h smtpd_hard_error_limit)"
+
 if [ -n "${RELAYHOST}" ]; then
     postconf -e "relayhost=[${RELAYHOST}]"
     echo "**** All outbound mail relayed through ${RELAYHOST}"

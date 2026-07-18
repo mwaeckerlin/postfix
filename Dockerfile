@@ -38,11 +38,11 @@ RUN postconf -e 'smtpd_sasl_type = dovecot'
 RUN postconf -e 'smtpd_use_tls = no'
 RUN postconf -e 'smtpd_sasl_security_options = noanonymous'
 
-# Message size 1GB
-RUN postconf -e 'message_size_limit = 1073741824'
+# message_size_limit and smtpd_hard_error_limit are set at start-up from
+# the MESSAGE_SIZE_LIMIT / SMTP_HARD_ERROR_LIMIT env (see start.sh) so
+# they stay configurable with high, delivery-safe defaults.
 
 # antispam
-RUN postconf -e 'smtpd_hard_error_limit = 1'
 RUN postconf -e 'smtpd_helo_required = yes'
 RUN postconf -e 'smtpd_helo_restrictions = permit_sasl_authenticated, permit_mynetworks, reject_invalid_hostname, reject_non_fqdn_hostname, reject_unauth_pipelining'
 RUN postconf -e 'smtpd_sender_restrictions = permit_sasl_authenticated, permit_mynetworks, reject_non_fqdn_sender, reject_unauth_pipelining'
@@ -75,6 +75,10 @@ ENV LOCAL_DOMAINS ""
 ENV RSPAMD        ""
 ENV CHECK_SPF     "yes"
 ENV MYNETWORKS    ""
+# Delivery-affecting limits — high, configurable defaults (see start.sh).
+# MESSAGE_SIZE_LIMIT in bytes (0 = unlimited); default 1 GiB.
+ENV MESSAGE_SIZE_LIMIT    "1073741824"
+ENV SMTP_HARD_ERROR_LIMIT "20"
 USER root
 CMD /start.sh
 VOLUME /var/mail/domains
