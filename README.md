@@ -44,10 +44,38 @@ the stronger boundary.
 | `MESSAGE_SIZE_LIMIT` | `107374182400` (100 GiB) | Max accepted message size in bytes, `0` = unlimited; `mailbox_size_limit` is pinned to the same value. High on purpose — a legitimate mail must never bounce on an artificial default. |
 | `SMTP_HARD_ERROR_LIMIT` | `20` (postfix standard) | Hard SMTP protocol errors per session before disconnect. |
 | `POSTFIX_TLS_LOGLEVEL` | `0` | TLS handshake logging (smtpd/smtp/lmtp). `2` = handshake debug — a diagnostics override for test stacks, never a production default. |
+| `POSTFIX_ALLOW_CLEARTEXT_AUTH` | `no` | Only relevant when no TLS certificate is present: `no` disables SASL entirely (no login without TLS), `yes` deliberately offers SASL on the unencrypted channel — only for an isolated network that cannot have certificates. |
 
 TLS enables itself when `/etc/letsencrypt/live/$HOSTROOT/` contains
 `fullchain.pem` + `privkey.pem`; SASL auth is then TLS-only
 (`smtpd_tls_auth_only=yes`), so no password ever travels unencrypted.
+
+**Trade-off — no certificate, no login:** without a certificate there
+is no STARTTLS, so offering SASL would put passwords on the wire in
+the clear. The image therefore disables SASL entirely in that case
+(same behaviour as the sibling dovecot image, where a certless stack
+has no usable login). A deliberately TLS-less deployment on an
+isolated network can opt into cleartext auth with
+`POSTFIX_ALLOW_CLEARTEXT_AUTH=yes` — the start-up log then carries a
+clear warning. Pinned by the mailservice e2e test
+`test_tls.py::test_smtp_auth_disabled_without_cert`.
+
+**Trade-off — milter fail-open:** the rspamd milter is wired with
+`milter_default_action=accept`: if the rspamd container is down, mail
+is accepted without spam/virus scanning and outbound mail leaves
+unsigned until rspamd is back. This follows the mailservice design
+(«reliability over filtering» — a milter outage must never bounce or
+drop legitimate mail); the alternative `tempfail` would defer all mail
+for the duration of the outage. Operators who prefer that behaviour
+can override `milter_default_action` via `postconf` in a derived
+image.
+
+**Input validation:** every environment value is whitelist-validated
+at start-up before it is rendered into the postfix sql maps or fed to
+`postconf` — a malformed value (embedded newline, stray shell/config
+metacharacters, out-of-range number) aborts the start with a clear
+`invalid <VAR>` error. Pinned by `tests/config-validation.sh`
+(`npm test`).
 
 ## Volumes
 

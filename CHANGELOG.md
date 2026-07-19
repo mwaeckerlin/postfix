@@ -1,5 +1,22 @@
 # Changelog
 
+- 2026-07-18 **security hardening**
+    - Without a TLS certificate the server no longer offers
+      authentication at all — previously a certless deployment
+      silently accepted logins over the unencrypted channel. A
+      deliberately TLS-less setup (isolated network) can opt in via
+      the new `POSTFIX_ALLOW_CLEARTEXT_AUTH=yes` switch; the start-up
+      log then warns clearly. Pinned by an end-to-end test with valid
+      credentials.
+    - Every configuration value from the environment is now validated
+      before use; a malformed value (for example an embedded newline
+      that could smuggle extra configuration directives) refuses to
+      start with a clear `invalid <VAR>` error instead of silently
+      producing a broken or unsafe configuration. Covered by the new
+      config-validation test suite (`npm test`).
+    - Documented trade-offs: no-certificate login behaviour and the
+      fail-open milter wiring (an rspamd outage never bounces mail).
+
 - 2026-07-18 **headless image**
     - The image no longer contains a shell, busybox, perl or a package
       manager: a compiled `init` binary configures postfix from the

@@ -124,6 +124,10 @@ ENV MESSAGE_SIZE_LIMIT="107374182400" \
 # TLS handshake logging (0 = production default, 2 = handshake debug —
 # diagnostics override for test stacks).
 ENV POSTFIX_TLS_LOGLEVEL="0"
+# Without a TLS certificate SASL auth is disabled entirely (stack
+# invariant: passwords never travel unencrypted). Set to "yes" only for
+# a deliberately TLS-less deployment on an isolated network.
+ENV POSTFIX_ALLOW_CLEARTEXT_AUTH="no"
 EXPOSE 25
 # Trade-off: the postfix master process must start as root to bind
 # port 25 and manage the queue; every service then drops privileges to

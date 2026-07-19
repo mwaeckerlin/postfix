@@ -1,0 +1,24 @@
+# Build / standalone smoke compose — build the image on its own for
+# testing. Not a production deployment; see mwaeckerlin/mailservice for
+# the intended context (database, dovecot, rspamd wiring).
+
+services:
+  postfix:
+    image: mwaeckerlin/postfix
+    build: .
+    ports:
+      # loopback only: a bare postfix without DB/rspamd wiring is a
+      # smoke-test artefact — never expose it beyond the local machine
+      - "127.0.0.1:2525:25"
+    volumes:
+      - spool:/var/spool/postfix
+    healthcheck:
+      test: ["CMD", "/usr/bin/init", "--healthcheck"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+      start_period: 3s
+
+volumes:
+  # the mail queue must survive container recreates (see README)
+  spool:

@@ -16,7 +16,11 @@ noted):
      pre-existing milters, skip when already configured).
   2. TLS is enabled when /etc/letsencrypt/live/$HOSTROOT (fallback
      $HOSTNAME, then $DOMAIN) holds fullchain.pem + privkey.pem; SASL
-     is then TLS-only (smtpd_tls_auth_only=yes).
+     is then TLS-only (smtpd_tls_auth_only=yes). WITHOUT a certificate
+     SASL is disabled entirely — no password ever travels unencrypted
+     (stack invariant, see the mailservice README). A deliberately
+     TLS-less deployment (isolated network) can opt into cleartext
+     auth with POSTFIX_ALLOW_CLEARTEXT_AUTH=yes.
   3. The six /etc/postfix/sql/*.cf maps get the DB_USER / DB_PASSWORD /
      DB_HOST / DB_NAME credentials (idempotent rewrite: credentials
      first, the map's query last).
@@ -32,6 +36,10 @@ noted):
      stack sets 2 for diagnosable handshake logs).
   8. postsuper queue sanity, then exec master in init mode (-i) as
      PID 1. maillog_file=/dev/stdout keeps logs on stdout.
+  9. Every env value is whitelist-validated before it is rendered into
+     the sql map files or fed to postconf — a malformed value (a
+     newline above all: config injection) aborts the start with a
+     clear `invalid <VAR>` error. Pinned by tests/config-validation.sh.
 
 Removed vs. v3.0 (headless): the perl-based postfix-policyd-spf-perl
 and its CHECK_SPF knob. SPF verification is rspamd's SPF module — the
@@ -80,6 +88,49 @@ std::string
 env_or(const char *name, const std::string &fallback = {}) {
   const char *v = std::getenv(name);
   return (v && *v) ? std::string(v) : fallback;
+}
+
+// Every env value is rendered into the sql map files (plain key=value
+// lines) or fed to `postconf -e`, so an unvalidated value — a newline
+// above all — would inject arbitrary extra directives (config
+// injection). Operator input is input: whitelist-validate each value
+// class and refuse to start on anything malformed (pinned by
+// tests/config-validation.sh).
+[[noreturn]] void
+die_invalid(const char *var, const std::string &value) {
+  std::cerr << "**** ERROR: invalid " << var << " \"" << value
+            << "\" — refusing to start" << std::endl;
+  std::exit(1);
+}
+
+// Empty stays allowed: every knob is optional — validation constrains
+// only what IS set.
+void
+check_chars(const char *var, const std::string &v, const std::string &extra) {
+  for (char c : v)
+    if (!std::isalnum(static_cast<unsigned char>(c)) &&
+        extra.find(c) == std::string::npos)
+      die_invalid(var, v);
+}
+
+// A secret must not be echoed back into the container log on error.
+void
+check_no_crlf_secret(const char *var, const std::string &v) {
+  if (v.find_first_of("\r\n") != std::string::npos) {
+    std::cerr << "**** ERROR: invalid " << var
+              << " (value withheld) — refusing to start" << std::endl;
+    std::exit(1);
+  }
+}
+
+long
+check_num(const char *var, const std::string &v, long min, long max) {
+  if (v.empty() || v.size() > 15 ||
+      v.find_first_not_of("0123456789") != std::string::npos)
+    die_invalid(var, v);
+  long n = std::atol(v.c_str());
+  if (n < min || n > max) die_invalid(var, v);
+  return n;
 }
 
 // Capture ONLY stdout — stderr stays on the container log. postconf
@@ -194,10 +245,26 @@ configure_tls(const std::string &certdomain) {
     postconf_set("smtp_tls_note_starttls_offer", "yes");
     std::cerr << "**** Status: TLS configured for " << certdomain
               << " on " << live << std::endl;
-  } else {
+  } else if (env_or("POSTFIX_ALLOW_CLEARTEXT_AUTH", "no") == "yes") {
+    // Deliberate operator opt-in for a TLS-less deployment (isolated
+    // network): SASL stays enabled and passwords travel in the clear.
     postconf_set("smtpd_tls_auth_only", "no");
     std::cerr << "#### WARNING! Status: TLS NOT configured for "
-              << certdomain << " on " << live << std::endl;
+              << certdomain << " on " << live
+              << " — POSTFIX_ALLOW_CLEARTEXT_AUTH=yes: passwords travel"
+              << " UNENCRYPTED" << std::endl;
+  } else {
+    // Stack invariant: passwords never travel unencrypted. No cert
+    // means no STARTTLS, so offering SASL here would put credentials
+    // on the wire in the clear — disable SASL instead (same behaviour
+    // as dovecot: a stack without a certificate has no usable login).
+    postconf_set("smtpd_sasl_auth_enable", "no");
+    std::cerr << "#### WARNING! Status: TLS NOT configured for "
+              << certdomain << " on " << live
+              << " — SASL auth DISABLED (no login without TLS; set"
+              << " POSTFIX_ALLOW_CLEARTEXT_AUTH=yes to deliberately"
+              << " allow cleartext auth on an isolated network)"
+              << std::endl;
   }
 }
 
@@ -248,25 +315,55 @@ tcp_probe(const std::string &host, int port) {
 } // namespace
 
 int main(int argc, char *argv[]) try {
+  const std::string rspamd      = env_or("RSPAMD");
+  const std::string domain      = env_or("DOMAIN");
+  const std::string hostname    = env_or("HOSTNAME", domain);
+  const std::string hostroot    = env_or("HOSTROOT", hostname);
+  const std::string db_user     = env_or("DB_USER");
+  const std::string db_password = env_or("DB_PASSWORD");
+  const std::string db_host     = env_or("DB_HOST");
+  const std::string db_name     = env_or("DB_NAME");
+  const std::string mynetworks  = env_or("MYNETWORKS");
+  const std::string relayhost   = env_or("RELAYHOST");
+  const std::string cleartext   = env_or("POSTFIX_ALLOW_CLEARTEXT_AUTH", "no");
+
+  // Validate every env value before it is rendered anywhere — also on
+  // the --healthcheck path, so a misconfigured container reports
+  // unhealthy instead of probing a listener that never came up.
+  check_chars("RSPAMD",     rspamd,     ".-_:");
+  check_chars("DOMAIN",     domain,     ".-");
+  check_chars("HOSTNAME",   hostname,   ".-");
+  check_chars("HOSTROOT",   hostroot,   ".-");   // no '/': path segment only
+  check_chars("DB_USER",    db_user,    "._-");
+  check_no_crlf_secret("DB_PASSWORD", db_password);
+  check_chars("DB_HOST",    db_host,    ".-_:,");
+  check_chars("DB_NAME",    db_name,    "._-");
+  check_chars("MYNETWORKS", mynetworks, " ./:,[]!-");
+  check_chars("RELAYHOST",  relayhost,  ".-_:");
+  check_num("MESSAGE_SIZE_LIMIT",
+            env_or("MESSAGE_SIZE_LIMIT", "107374182400"), 0, 999999999999999L);
+  check_num("SMTP_HARD_ERROR_LIMIT",
+            env_or("SMTP_HARD_ERROR_LIMIT", "20"), 1, 1000000);
+  check_num("POSTFIX_TLS_LOGLEVEL",
+            env_or("POSTFIX_TLS_LOGLEVEL", "0"), 0, 4);
+  if (cleartext != "yes" && cleartext != "no")
+    die_invalid("POSTFIX_ALLOW_CLEARTEXT_AUTH", cleartext);
+
   if (argc > 1 && std::string(argv[1]) == "--healthcheck")
     return tcp_probe("127.0.0.1", 25);
 
   // Rspamd milter — one single upstream that covers DKIM signing +
   // DKIM verify + DMARC + SPF + greylist + Bayes + ClamAV.
-  const std::string rspamd = env_or("RSPAMD");
   if (!rspamd.empty()) {
     const std::string addr = with_default_port(rspamd, "11332");
     add_milter(addr);
     std::cerr << "**** Rspamd milter configured: " << addr << std::endl;
   }
 
-  const std::string domain   = env_or("DOMAIN");
-  const std::string hostname = env_or("HOSTNAME", domain);
-  configure_tls(env_or("HOSTROOT", hostname));
+  configure_tls(hostroot);
 
   for (const char *cfg : SQL_CONFIGS)
-    write_sql_config(cfg, env_or("DB_USER"), env_or("DB_PASSWORD"),
-                     env_or("DB_HOST"), env_or("DB_NAME"));
+    write_sql_config(cfg, db_user, db_password, db_host, db_name);
 
   if (!env_or("DISABLE_DNSBL").empty()) {
     postconf_set("smtpd_client_restrictions",
@@ -285,7 +382,6 @@ int main(int argc, char *argv[]) try {
     std::cerr << "**** DNSBL/RBL checks disabled" << std::endl;
   }
 
-  const std::string mynetworks = env_or("MYNETWORKS");
   if (!mynetworks.empty()) {
     postconf_set("mynetworks", mynetworks);
     std::cerr << "**** mynetworks restricted to " << mynetworks << std::endl;
@@ -303,7 +399,6 @@ int main(int argc, char *argv[]) try {
   postconf_set("smtp_tls_loglevel",  tls_loglevel);
   postconf_set("lmtp_tls_loglevel",  tls_loglevel);
 
-  const std::string relayhost = env_or("RELAYHOST");
   if (!relayhost.empty()) {
     postconf_set("relayhost", "[" + relayhost + "]");
     std::cerr << "**** All outbound mail relayed through "
