@@ -48,6 +48,40 @@ RUN postconf -e 'smtpd_sasl_type = dovecot'
 RUN postconf -e 'smtpd_use_tls = no'
 RUN postconf -e 'smtpd_sasl_security_options = noanonymous'
 
+# Record the transport security of the receiving hop in our own
+# Received: header (`(using TLSv1.3 with cipher …)` — or nothing when
+# the peer delivered in the clear). Adding a header never breaks a DKIM
+# signature (signatures only cover the headers the signer listed).
+RUN postconf -e 'smtpd_tls_received_header = yes'
+# Hand the live session's TLS version and cipher to the rspamd milter
+# (as macros) so rspamd can stamp the machine-readable
+# X-Transport-Security header on every incoming mail — the trustworthy
+# last-hop measurement, taken at our MX. See the rspamd README
+# «Transport encryption transparency».
+RUN postconf -e 'milter_mail_macros = i {auth_type} {auth_authen} {auth_author} {mail_addr} {mail_host} {mail_mailer} {tls_version} {cipher}'
+
+# Dedicated submission services (RFC 6409 / RFC 8314), separate from the
+# port-25 MX so each role gets its own policy: submission enforces TLS
+# (encrypt) and SASL auth, with no MX/DNSBL restrictions for our own
+# authenticated users. Port 25 stays opportunistic-TLS + anonymous for
+# server-to-server mail. Both require a certificate; without one the
+# submission listeners refuse every login (nothing to encrypt with).
+#   587 = STARTTLS submission, 465 = implicit-TLS submission (smtps).
+RUN postconf -M submission/inet='submission inet n - n - - smtpd'
+RUN postconf -P submission/inet/syslog_name=postfix/submission
+RUN postconf -P submission/inet/smtpd_tls_security_level=encrypt
+RUN postconf -P submission/inet/smtpd_sasl_auth_enable=yes
+RUN postconf -P submission/inet/smtpd_tls_auth_only=yes
+RUN postconf -P submission/inet/smtpd_client_restrictions=permit_sasl_authenticated,reject
+RUN postconf -P submission/inet/smtpd_relay_restrictions=permit_sasl_authenticated,reject
+RUN postconf -M smtps/inet='smtps inet n - n - - smtpd'
+RUN postconf -P smtps/inet/syslog_name=postfix/smtps
+RUN postconf -P smtps/inet/smtpd_tls_wrappermode=yes
+RUN postconf -P smtps/inet/smtpd_sasl_auth_enable=yes
+RUN postconf -P smtps/inet/smtpd_tls_auth_only=yes
+RUN postconf -P smtps/inet/smtpd_client_restrictions=permit_sasl_authenticated,reject
+RUN postconf -P smtps/inet/smtpd_relay_restrictions=permit_sasl_authenticated,reject
+
 # message_size_limit and smtpd_hard_error_limit are set at start-up
 # from the MESSAGE_SIZE_LIMIT / SMTP_HARD_ERROR_LIMIT env (see
 # init.cpp) so they stay configurable with high, delivery-safe
@@ -128,7 +162,14 @@ ENV POSTFIX_TLS_LOGLEVEL="0"
 # invariant: passwords never travel unencrypted). Set to "yes" only for
 # a deliberately TLS-less deployment on an isolated network.
 ENV POSTFIX_ALLOW_CLEARTEXT_AUTH="no"
-EXPOSE 25
+# Opt-in: require TLS on the port-25 MX too (security_level=encrypt) —
+# every inbound connection must negotiate TLS 1.2+ or the mail is
+# rejected. Deliberately RFC-3207-non-compliant for a public MX; fit
+# for internal / closed / B2B ingresses. Needs a certificate.
+ENV SMTPD_TLS_REQUIRED="no"
+# 25 = MX (server-to-server), 587 = STARTTLS submission,
+# 465 = implicit-TLS submission (smtps).
+EXPOSE 25 587 465
 # Trade-off: the postfix master process must start as root to bind
 # port 25 and manage the queue; every service then drops privileges to
 # the postfix user per master.cf. See README.

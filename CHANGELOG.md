@@ -1,5 +1,24 @@
 # Changelog
 
+- 2026-07-20 **submission services + transport transparency**
+    - Dedicated submission listeners on 587 (STARTTLS) and 465
+      (implicit TLS), separate from the port-25 MX: both enforce TLS
+      and SASL authentication and drop the MX/DNSBL restrictions for
+      authenticated users. Port 25 stays anonymous with opportunistic
+      TLS.
+    - Opportunistic TLS no longer forces a TLS 1.2 floor (only SSLv2/3
+      are excluded), so a legacy peer's mail is still encrypted rather
+      than pushed back to plaintext; the 1.2 floor applies where TLS is
+      mandatory (submission, and the new opt-in reject).
+    - New opt-in `SMTPD_TLS_REQUIRED=yes`: the MX then rejects any
+      connection that will not negotiate TLS 1.2+ (deliberately
+      RFC-3207-non-compliant — for internal/closed ingresses only).
+    - Records the receiving hop's TLS in the `Received` header and hands
+      the TLS version/cipher to the rspamd milter, which stamps the
+      machine-readable `X-Transport-Security` header.
+    - Config validation extended to `POSTFIX_ALLOW_CLEARTEXT_AUTH` and
+      `SMTPD_TLS_REQUIRED`.
+
 - 2026-07-18 **security hardening**
     - Without a TLS certificate the server no longer offers
       authentication at all — previously a certless deployment

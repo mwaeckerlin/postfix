@@ -235,16 +235,34 @@ write_sql_config(const fs::path &path,
 void
 configure_tls(const std::string &certdomain) {
   const std::string live = "/etc/letsencrypt/live/" + certdomain;
+  const bool require_tls = env_or("SMTPD_TLS_REQUIRED", "no") == "yes";
   if (fs::exists(live + "/fullchain.pem") &&
       fs::exists(live + "/privkey.pem")) {
     postconf_set("smtpd_tls_cert_file",       live + "/fullchain.pem");
     postconf_set("smtpd_tls_key_file",        live + "/privkey.pem");
     postconf_set("smtpd_use_tls",             "yes");
-    postconf_set("smtpd_tls_security_level",  "may");
+    // Opportunistic by default (may): a legacy peer without TLS 1.2
+    // falls back to plaintext and the mail still arrives — RFC 7435,
+    // delivery before filtering. SMTPD_TLS_REQUIRED=yes flips this to
+    // `encrypt`: every inbound connection MUST negotiate TLS (and, via
+    // smtpd_tls_mandatory_protocols=>=TLSv1.2, at least 1.2) or the
+    // mail is rejected. That is deliberately RFC-3207-non-compliant for
+    // a public MX (a peer without modern TLS can no longer deliver) —
+    // fit for internal / closed / B2B ingresses. See README.
+    postconf_set("smtpd_tls_security_level",  require_tls ? "encrypt" : "may");
     postconf_set("smtpd_tls_auth_only",       "yes");
     postconf_set("smtp_tls_note_starttls_offer", "yes");
     std::cerr << "**** Status: TLS configured for " << certdomain
-              << " on " << live << std::endl;
+              << " on " << live
+              << (require_tls ? " (REQUIRED: non-TLS/<1.2 rejected)"
+                              : " (opportunistic)")
+              << std::endl;
+  } else if (require_tls) {
+    // Cannot enforce TLS without a certificate — fail fast rather than
+    // silently accept cleartext while claiming to require encryption.
+    throw std::runtime_error(
+        "SMTPD_TLS_REQUIRED=yes but no certificate at " + live +
+        " — cannot enforce TLS without a cert");
   } else if (env_or("POSTFIX_ALLOW_CLEARTEXT_AUTH", "no") == "yes") {
     // Deliberate operator opt-in for a TLS-less deployment (isolated
     // network): SASL stays enabled and passwords travel in the clear.
@@ -348,6 +366,9 @@ int main(int argc, char *argv[]) try {
             env_or("POSTFIX_TLS_LOGLEVEL", "0"), 0, 4);
   if (cleartext != "yes" && cleartext != "no")
     die_invalid("POSTFIX_ALLOW_CLEARTEXT_AUTH", cleartext);
+  const std::string require_tls = env_or("SMTPD_TLS_REQUIRED", "no");
+  if (require_tls != "yes" && require_tls != "no")
+    die_invalid("SMTPD_TLS_REQUIRED", require_tls);
 
   if (argc > 1 && std::string(argv[1]) == "--healthcheck")
     return tcp_probe("127.0.0.1", 25);

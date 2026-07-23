@@ -82,6 +82,8 @@ _reject relayhost_bad         RELAYHOST   $'relay.example.com\nsmtpd_sasl_auth_e
 _reject size_not_numeric      MESSAGE_SIZE_LIMIT    "100G"
 _reject hard_error_bad        SMTP_HARD_ERROR_LIMIT "many"
 _reject loglevel_out_of_range POSTFIX_TLS_LOGLEVEL  "9"
+_reject cleartext_auth_bad    POSTFIX_ALLOW_CLEARTEXT_AUTH "maybe"
+_reject tls_required_bad      SMTPD_TLS_REQUIRED    "sometimes"
 
 _accept defaults
 _accept explicit_values \
@@ -97,7 +99,9 @@ _accept explicit_values \
     -e RELAYHOST=relay.example.com:587 \
     -e MESSAGE_SIZE_LIMIT=107374182400 \
     -e SMTP_HARD_ERROR_LIMIT=20 \
-    -e POSTFIX_TLS_LOGLEVEL=2
+    -e POSTFIX_TLS_LOGLEVEL=2 \
+    -e POSTFIX_ALLOW_CLEARTEXT_AUTH=no \
+    -e SMTPD_TLS_REQUIRED=yes
 
 echo ""
 echo "==> Config validation results: ${PASS} passed, ${FAIL} failed"
