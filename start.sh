@@ -107,4 +107,21 @@ if [ -n "${RELAYHOST}" ]; then
     echo "**** All outbound mail relayed through ${RELAYHOST}"
 fi
 
+# The queue is a persistent volume, so master.pid survives a container
+# replacement: postfix start-fg then reads a PID from the previous
+# container, believes the mail system is already running and aborts with
+# "fatal: the Postfix mail system is already running". A PID inside this
+# container's namespace either belongs to a live process or to nothing at
+# all, so the stale file is removed unless that exact PID is alive here.
+PIDFILE="$(postconf -h queue_directory)/pid/master.pid"
+if [ -f "${PIDFILE}" ]; then
+    STALE_PID="$(cat "${PIDFILE}" 2>/dev/null | tr -dc '0-9')"
+    if [ -n "${STALE_PID}" ] && [ -d "/proc/${STALE_PID}" ]; then
+        echo "**** Postfix already running as PID ${STALE_PID}"
+    else
+        rm -f "${PIDFILE}"
+        echo "**** Removed stale ${PIDFILE} (PID ${STALE_PID:-unknown} is not running)"
+    fi
+fi
+
 /usr/sbin/postfix start-fg
