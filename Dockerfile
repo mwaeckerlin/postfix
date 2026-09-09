@@ -1,4 +1,4 @@
-FROM mwaeckerlin/mailforward as build
+FROM mwaeckerlin/mailforward:1 as build
 RUN $PKG_INSTALL postfix postfix-mysql postfix-pcre postfix-policyd-spf-perl
 RUN printf '\npolicy-spf  unix  -       n       n       -       -       spawn\n    user=nobody argv=/usr/bin/postfix-policyd-spf-perl\n' \
     >> /etc/postfix/master.cf
