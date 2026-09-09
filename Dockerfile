@@ -5,7 +5,7 @@
 # postfix fresh (very-base has the package manager the headless parent
 # no longer ships) and layers this image's deltas on the parent's
 # main.cf.
-FROM mwaeckerlin/mailforward AS parent
+FROM mwaeckerlin/mailforward:3 AS parent
 
 FROM mwaeckerlin/very-base AS init
 RUN $PKG_INSTALL g++
