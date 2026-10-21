@@ -33,8 +33,9 @@ RUN postconf -e 'virtual_gid_maps = static:5000'
 RUN postconf -e 'virtual_uid_maps = static:5000'
 RUN postconf -e 'virtual_minimum_uid = 100'
 RUN postconf -e 'smtputf8_enable = no'
-RUN postconf -e 'virtual_transport=lmtp:inet:dovecot'
-RUN postconf -e 'mailbox_transport=lmtp:inet:dovecot'
+# virtual_transport, mailbox_transport and smtpd_sasl_path point at
+# dovecot and are set at start-up from DOVECOT_HOST / DOVECOT_LMTP_PORT /
+# DOVECOT_SASL_PORT (see init.cpp).
 RUN postconf -e 'local_transport = virtual'
 
 # TLS handshake loglevels are set at start-up from POSTFIX_TLS_LOGLEVEL
@@ -43,7 +44,6 @@ RUN postconf -e 'local_transport = virtual'
 # SASL
 RUN postconf -e 'broken_sasl_auth_clients = yes'
 RUN postconf -e 'smtpd_sasl_auth_enable = yes'
-RUN postconf -e 'smtpd_sasl_path = inet:dovecot:12345'
 RUN postconf -e 'smtpd_sasl_type = dovecot'
 RUN postconf -e 'smtpd_use_tls = no'
 RUN postconf -e 'smtpd_sasl_security_options = noanonymous'
@@ -147,9 +147,20 @@ ENV CONTAINERNAME="postfix" \
     HOSTNAME="" \
     DOMAIN="" \
     RSPAMD="" \
+    DB_PORT="" \
     MYNETWORKS="" \
     RELAYHOST="" \
-    DISABLE_DNSBL=""
+    DISABLE_DNSBL="" \
+    DNSBL_SERVERS="" \
+    RHSBL_SERVERS=""
+# Dovecot delivers via LMTP and authenticates SMTP logins via its SASL
+# listener; both are ports of the dovecot service, not of this one.
+ENV DOVECOT_HOST="dovecot" \
+    DOVECOT_LMTP_PORT="24" \
+    DOVECOT_SASL_PORT="12345"
+# What postfix does with mail while the rspamd milter is unreachable:
+# accept = deliver unscanned (reliability over filtering).
+ENV MILTER_DEFAULT_ACTION="accept"
 # Delivery-affecting limits — high, configurable defaults (see
 # init.cpp). MESSAGE_SIZE_LIMIT in bytes (0 = unlimited); default
 # 100 GiB so even several photos/videos in one mail are accepted.

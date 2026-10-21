@@ -84,6 +84,13 @@ _reject hard_error_bad        SMTP_HARD_ERROR_LIMIT "many"
 _reject loglevel_out_of_range POSTFIX_TLS_LOGLEVEL  "9"
 _reject cleartext_auth_bad    POSTFIX_ALLOW_CLEARTEXT_AUTH "maybe"
 _reject tls_required_bad      SMTPD_TLS_REQUIRED    "sometimes"
+_reject db_port_bad           DB_PORT               "3306x"
+_reject dovecot_host_bad      DOVECOT_HOST          $'dovecot\nrelayhost = evil'
+_reject lmtp_port_range       DOVECOT_LMTP_PORT     "99999"
+_reject sasl_port_bad         DOVECOT_SASL_PORT     "sasl"
+_reject milter_action_bad     MILTER_DEFAULT_ACTION "ignore"
+_reject dnsbl_injection       DNSBL_SERVERS         $'zen.spamhaus.org\nmynetworks = 0.0.0.0/0'
+_reject rhsbl_restriction     RHSBL_SERVERS         "dbl.spamhaus.org, permit"
 
 _accept defaults
 _accept explicit_values \
@@ -91,6 +98,13 @@ _accept explicit_values \
     -e DB_PASSWORD='s3cret-Pa55!' \
     -e DB_HOST=postfixadmin-db \
     -e DB_NAME=postfixadmin \
+    -e DB_PORT=3306 \
+    -e DOVECOT_HOST=dovecot \
+    -e DOVECOT_LMTP_PORT=24 \
+    -e DOVECOT_SASL_PORT=12345 \
+    -e MILTER_DEFAULT_ACTION=tempfail \
+    -e DNSBL_SERVERS='zen.spamhaus.org bl.example.org' \
+    -e RHSBL_SERVERS=dbl.spamhaus.org \
     -e MYNETWORKS='127.0.0.0/8, [::1]/128' \
     -e HOSTNAME=mail.example.com \
     -e HOSTROOT=example.com \

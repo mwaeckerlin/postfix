@@ -13,7 +13,10 @@ noted):
 
   1. RSPAMD=host or host:port (default port 11332): merge the rspamd
      milter into smtpd_milters / non_smtpd_milters (append, keep any
-     pre-existing milters, skip when already configured).
+     pre-existing milters, skip when already configured);
+     milter_default_action from MILTER_DEFAULT_ACTION (default accept).
+     Delivery and SASL go to DOVECOT_HOST on DOVECOT_LMTP_PORT /
+     DOVECOT_SASL_PORT (defaults dovecot, 24, 12345).
   2. TLS is enabled when /etc/letsencrypt/live/$HOSTROOT (fallback
      $HOSTNAME, then $DOMAIN) holds fullchain.pem + privkey.pem; SASL
      is then TLS-only (smtpd_tls_auth_only=yes). WITHOUT a certificate
@@ -22,10 +25,12 @@ noted):
      TLS-less deployment (isolated network) can opt into cleartext
      auth with POSTFIX_ALLOW_CLEARTEXT_AUTH=yes.
   3. The six /etc/postfix/sql/*.cf maps get the DB_USER / DB_PASSWORD /
-     DB_HOST / DB_NAME credentials (idempotent rewrite: credentials
-     first, the map's query last).
+     DB_HOST / DB_NAME credentials, DB_PORT appended to every host that
+     names none (idempotent rewrite: credentials first, the map's query
+     last).
   4. DISABLE_DNSBL: drop the RBL lookups from the smtpd restrictions
-     (test / offline stacks).
+     (test / offline stacks). Otherwise DNSBL_SERVERS / RHSBL_SERVERS
+     replace the blocklist zones (unset keeps the baked-in zones).
   5. MYNETWORKS, myhostname=${HOSTNAME:-$DOMAIN}, mydomain=$DOMAIN,
      RELAYHOST → relayhost=[..].
   6. Delivery-affecting limits from env — high, configurable defaults
@@ -59,6 +64,7 @@ Supports --healthcheck: TCP-probes the SMTP listener at 127.0.0.1:25.
 #include <fstream>
 #include <iostream>
 #include <netinet/in.h>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -187,24 +193,112 @@ with_default_port(std::string hostport, const std::string &port) {
   return hostport;
 }
 
+std::string
+trim(const std::string &s) {
+  const auto b = s.find_first_not_of(" \t");
+  if (b == std::string::npos) return {};
+  const auto e = s.find_last_not_of(" \t");
+  return s.substr(b, e - b + 1);
+}
+
+std::vector<std::string>
+split_ws(const std::string &s) {
+  std::vector<std::string> out;
+  std::istringstream in(s);
+  std::string tok;
+  while (in >> tok) out.push_back(tok);
+  return out;
+}
+
 // Append the milter to smtpd_milters / non_smtpd_milters, keeping any
-// pre-existing entries; skip when already configured.
+// pre-existing entries; skip the merge when already configured.
 void
-add_milter(const std::string &addr) {
+add_milter(const std::string &addr, const std::string &default_action) {
   const std::string inet = "inet:" + addr;
   const std::string cur = postconf_get("smtpd_milters");
-  if (cur.find(inet) != std::string::npos) return;  // already configured
   if (cur.empty()) {
     postconf_set("smtpd_milters",     inet);
     postconf_set("non_smtpd_milters", inet);
-  } else {
+  } else if (cur.find(inet) == std::string::npos) {
     postconf_set("smtpd_milters", cur + ", " + inet);
     const std::string cur_non = postconf_get("non_smtpd_milters");
     postconf_set("non_smtpd_milters",
                  cur_non.empty() ? inet : cur_non + ", " + inet);
   }
-  postconf_set("milter_default_action", "accept");
+  postconf_set("milter_default_action", default_action);
   postconf_set("milter_protocol",       "6");
+}
+
+void
+configure_dovecot(const std::string &host, const std::string &lmtp_port,
+                  const std::string &sasl_port) {
+  const std::string lmtp = "lmtp:inet:" + host + ":" + lmtp_port;
+  postconf_set("virtual_transport", lmtp);
+  postconf_set("mailbox_transport", lmtp);
+  postconf_set("smtpd_sasl_path",   "inet:" + host + ":" + sasl_port);
+  std::cerr << "**** dovecot: " << lmtp << ", SASL inet:" << host << ":"
+            << sasl_port << std::endl;
+}
+
+// Each blocklist check (reject_rbl_client, reject_rhsbl_<kind>) keeps
+// its place in every restriction list, with the zones from the env.
+void
+set_blocklists(const std::string &rbl, const std::string &rhsbl) {
+  if (rbl.empty() && rhsbl.empty()) return;
+  for (const char *param : {"smtpd_client_restrictions",
+                            "smtpd_helo_restrictions",
+                            "smtpd_sender_restrictions",
+                            "smtpd_recipient_restrictions",
+                            "smtpd_relay_restrictions"}) {
+    std::vector<std::string> items;
+    std::set<std::string> done;
+    std::istringstream in(postconf_get(param));
+    std::string item;
+    while (std::getline(in, item, ',')) {
+      item = trim(item);
+      if (item.empty()) continue;
+      const std::string kind = item.substr(0, item.find_first_of(" \t"));
+      const bool is_rbl   = kind == "reject_rbl_client";
+      const bool is_rhsbl = kind.rfind("reject_rhsbl_", 0) == 0;
+      const std::string &zones = is_rbl ? rbl : rhsbl;
+      if ((!is_rbl && !is_rhsbl) || zones.empty()) {
+        items.push_back(item);
+        continue;
+      }
+      if (!done.insert(kind).second) continue;
+      for (const auto &zone : split_ws(zones)) items.push_back(kind + " " + zone);
+    }
+    std::string joined;
+    for (const auto &i : items) joined += (joined.empty() ? "" : ", ") + i;
+    postconf_set(param, joined);
+  }
+  std::cerr << "**** DNSBL zones: " << (rbl.empty() ? "(built-in)" : rbl)
+            << "; RHSBL zones: " << (rhsbl.empty() ? "(built-in)" : rhsbl)
+            << std::endl;
+}
+
+// The brackets suppress the MX lookup; a port stays outside them.
+std::string
+bracket_relayhost(const std::string &relayhost) {
+  const auto colon = relayhost.find(':');
+  if (colon == std::string::npos) return "[" + relayhost + "]";
+  return "[" + relayhost.substr(0, colon) + "]" + relayhost.substr(colon);
+}
+
+// DB_PORT goes to every host of DB_HOST (comma separated) without one.
+std::string
+with_db_port(const std::string &hosts, const std::string &port) {
+  if (port.empty()) return hosts;
+  std::string out;
+  std::istringstream in(hosts);
+  std::string host;
+  while (std::getline(in, host, ',')) {
+    host = trim(host);
+    if (host.empty()) continue;
+    if (host.find(':') == std::string::npos) host += ":" + port;
+    out += (out.empty() ? "" : ", ") + host;
+  }
+  return out;
 }
 
 // Rewrite one sql map: DB credentials first, the map's `query` line
@@ -341,9 +435,16 @@ int main(int argc, char *argv[]) try {
   const std::string db_password = env_or("DB_PASSWORD");
   const std::string db_host     = env_or("DB_HOST");
   const std::string db_name     = env_or("DB_NAME");
+  const std::string db_port     = env_or("DB_PORT");
   const std::string mynetworks  = env_or("MYNETWORKS");
   const std::string relayhost   = env_or("RELAYHOST");
   const std::string cleartext   = env_or("POSTFIX_ALLOW_CLEARTEXT_AUTH", "no");
+  const std::string dovecot     = env_or("DOVECOT_HOST",      "dovecot");
+  const std::string lmtp_port   = env_or("DOVECOT_LMTP_PORT", "24");
+  const std::string sasl_port   = env_or("DOVECOT_SASL_PORT", "12345");
+  const std::string milter_action = env_or("MILTER_DEFAULT_ACTION", "accept");
+  const std::string dnsbl       = env_or("DNSBL_SERVERS");
+  const std::string rhsbl       = env_or("RHSBL_SERVERS");
 
   // Validate every env value before it is rendered anywhere — also on
   // the --healthcheck path, so a misconfigured container reports
@@ -358,6 +459,15 @@ int main(int argc, char *argv[]) try {
   check_chars("DB_NAME",    db_name,    "._-");
   check_chars("MYNETWORKS", mynetworks, " ./:,[]!-");
   check_chars("RELAYHOST",  relayhost,  ".-_:");
+  if (!db_port.empty()) check_num("DB_PORT", db_port, 1, 65535);
+  check_chars("DOVECOT_HOST", dovecot, ".-_");
+  check_num("DOVECOT_LMTP_PORT", lmtp_port, 1, 65535);
+  check_num("DOVECOT_SASL_PORT", sasl_port, 1, 65535);
+  if (milter_action != "accept" && milter_action != "reject" &&
+      milter_action != "tempfail" && milter_action != "quarantine")
+    die_invalid("MILTER_DEFAULT_ACTION", milter_action);
+  check_chars("DNSBL_SERVERS", dnsbl, ".- ");
+  check_chars("RHSBL_SERVERS", rhsbl, ".- ");
   check_num("MESSAGE_SIZE_LIMIT",
             env_or("MESSAGE_SIZE_LIMIT", "107374182400"), 0, 999999999999999L);
   check_num("SMTP_HARD_ERROR_LIMIT",
@@ -377,16 +487,22 @@ int main(int argc, char *argv[]) try {
   // DKIM verify + DMARC + SPF + greylist + Bayes + ClamAV.
   if (!rspamd.empty()) {
     const std::string addr = with_default_port(rspamd, "11332");
-    add_milter(addr);
-    std::cerr << "**** Rspamd milter configured: " << addr << std::endl;
+    add_milter(addr, milter_action);
+    std::cerr << "**** Rspamd milter configured: " << addr
+              << ", milter_default_action=" << milter_action << std::endl;
   }
+
+  configure_dovecot(dovecot, lmtp_port, sasl_port);
 
   configure_tls(hostroot);
 
   for (const char *cfg : SQL_CONFIGS)
-    write_sql_config(cfg, db_user, db_password, db_host, db_name);
+    write_sql_config(cfg, db_user, db_password,
+                     with_db_port(db_host, db_port), db_name);
 
-  if (!env_or("DISABLE_DNSBL").empty()) {
+  if (env_or("DISABLE_DNSBL").empty()) {
+    set_blocklists(dnsbl, rhsbl);
+  } else {
     postconf_set("smtpd_client_restrictions",
         "permit_sasl_authenticated");
     postconf_set("smtpd_helo_restrictions",
@@ -421,7 +537,7 @@ int main(int argc, char *argv[]) try {
   postconf_set("lmtp_tls_loglevel",  tls_loglevel);
 
   if (!relayhost.empty()) {
-    postconf_set("relayhost", "[" + relayhost + "]");
+    postconf_set("relayhost", bracket_relayhost(relayhost));
     std::cerr << "**** All outbound mail relayed through "
               << relayhost << std::endl;
   }
