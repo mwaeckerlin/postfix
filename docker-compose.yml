@@ -1,0 +1,4 @@
+services:
+  postfix:
+    image: mwaeckerlin/postfix
+    build: .
