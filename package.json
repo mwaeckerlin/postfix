@@ -1,6 +1,6 @@
 {
   "name": "@mwaeckerlin/postfix",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "scripts": {
     "build": "docker compose build",
     "start": "docker compose up --build --force-recreate --remove-orphans",
