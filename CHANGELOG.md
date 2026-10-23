@@ -1,5 +1,8 @@
 # Changelog
 
+- 2026-10-23 **3.5.3**
+    - The weekly run also rebuilds the version lines 1, 2 and 3, `mwaeckerlin/postfix:1`, `:2` and `:3`, from their branches, so they get the security fixes of their base images like this one; each line is tested before it is published
+
 - 2026-10-22 **3.5.2**
     - Delivery and SMTP login reach dovecot at `DOVECOT_HOST` (default `dovecot`) on `DOVECOT_LMTP_PORT` (default `24`) and `DOVECOT_SASL_PORT` (default `12345`), so a dovecot under another name or port works without a derived image
     - `MILTER_DEFAULT_ACTION` (default `accept`) decides what happens to mail while rspamd is unreachable; `tempfail` defers it instead of delivering it unscanned
