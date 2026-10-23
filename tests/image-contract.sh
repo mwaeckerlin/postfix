@@ -9,6 +9,8 @@
 #     stale master.pid from a previous container, start.sh removes the PID
 #     file, renders the database settings into the maps, wires the milters and
 #     the SPF check, and postfix answers on port 25 with STARTTLS
+#   - postconf prints no warning about the configuration, neither in the
+#     image nor after start.sh
 #
 # Nothing leaves the runner: the database, dovecot and the milters are named
 # but never reached, the milters point at a closed local port.
@@ -77,6 +79,14 @@ if [[ $? -eq 0 ]]; then
     _pass "postfix_check"
 else
     _fail "postfix_check" "${CHECK}"
+fi
+
+# postconf writes every warning about main.cf and master.cf to stderr
+WARNINGS="$(docker run --rm --pull=never --entrypoint /usr/sbin/postconf "${IMAGE}" -n 2>&1 > /dev/null)"
+if [[ -z "${WARNINGS}" ]]; then
+    _pass "image_no_postconf_warnings"
+else
+    _fail "image_no_postconf_warnings" "postconf warns: ${WARNINGS}"
 fi
 
 _expect_setting virtual_transport "lmtp:inet:dovecot"
@@ -161,6 +171,20 @@ if [[ "${RECIPIENT}" == *"check_policy_service unix:private/policy-spf"* ]]; the
     _pass "spf_check_enabled"
 else
     _fail "spf_check_enabled" "${RECIPIENT}"
+fi
+
+TLS_LEVEL="$(docker exec "${NAME}" postconf -h smtpd_tls_security_level 2> /dev/null)"
+if [[ "${TLS_LEVEL}" == "may" ]]; then
+    _pass "tls_security_level_may"
+else
+    _fail "tls_security_level_may" "smtpd_tls_security_level = '${TLS_LEVEL}'"
+fi
+
+WARNINGS="$(docker exec "${NAME}" postconf -n 2>&1 > /dev/null)"
+if [[ -z "${WARNINGS}" ]]; then
+    _pass "started_no_postconf_warnings"
+else
+    _fail "started_no_postconf_warnings" "postconf warns: ${WARNINGS}"
 fi
 
 echo ""

@@ -1,4 +1,4 @@
-FROM mwaeckerlin/mailforward:1 as build
+FROM mwaeckerlin/mailforward:1 AS build
 RUN $PKG_INSTALL postfix postfix-mysql postfix-pcre postfix-policyd-spf-perl
 RUN printf '\npolicy-spf  unix  -       n       n       -       -       spawn\n    user=nobody argv=/usr/bin/postfix-policyd-spf-perl\n' \
     >> /etc/postfix/master.cf
@@ -35,7 +35,6 @@ RUN postconf -e 'broken_sasl_auth_clients = yes'
 RUN postconf -e 'smtpd_sasl_auth_enable = yes'
 RUN postconf -e 'smtpd_sasl_path = inet:dovecot:12345'
 RUN postconf -e 'smtpd_sasl_type = dovecot'
-RUN postconf -e 'smtpd_use_tls = no'
 RUN postconf -e 'smtpd_sasl_security_options = noanonymous'
 
 # Message size 1GB
@@ -63,18 +62,18 @@ RUN ${PKG_REMOVE} apk-tools
 
 FROM mwaeckerlin/scratch
 COPY --from=build / /
-ENV CONTAINERNAME "postfix"
-ENV DB_USER       ""
-ENV DB_PASSWORD   ""
-ENV DB_HOST       ""
-ENV DB_NAME       ""
-ENV HOSTROOT      ""
-ENV HOSTNAME      ""
-ENV DOMAIN        ""
-ENV LOCAL_DOMAINS ""
-ENV OPENDKIM      ""
-ENV CHECK_SPF     "yes"
-ENV MYNETWORKS    ""
+ENV CONTAINERNAME="postfix"
+ENV DB_USER=""
+ENV DB_PASSWORD=""
+ENV DB_HOST=""
+ENV DB_NAME=""
+ENV HOSTROOT=""
+ENV HOSTNAME=""
+ENV DOMAIN=""
+ENV LOCAL_DOMAINS=""
+ENV OPENDKIM=""
+ENV CHECK_SPF="yes"
+ENV MYNETWORKS=""
 USER root
-CMD /start.sh
+CMD ["/start.sh"]
 VOLUME /var/mail/domains
