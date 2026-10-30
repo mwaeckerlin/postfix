@@ -91,6 +91,16 @@ _reject sasl_port_bad         DOVECOT_SASL_PORT     "sasl"
 _reject milter_action_bad     MILTER_DEFAULT_ACTION "ignore"
 _reject dnsbl_injection       DNSBL_SERVERS         $'zen.spamhaus.org\nmynetworks = 0.0.0.0/0'
 _reject rhsbl_restriction     RHSBL_SERVERS         "dbl.spamhaus.org, permit"
+_reject sender_domain_bad     REJECT_UNKNOWN_SENDER_DOMAIN  "true"
+_reject bounce_check_bad      REJECT_MULTI_RECIPIENT_BOUNCE "1"
+_reject unlisted_bad          REJECT_UNLISTED_RECIPIENT     "on"
+_reject delay_reject_bad      SMTPD_DELAY_REJECT            "maybe"
+_reject vrfy_bad              DISABLE_VRFY_COMMAND          "off"
+_reject reverse_client_bad    REJECT_UNKNOWN_REVERSE_CLIENT_HOSTNAME "yes please"
+_reject client_hostname_bad   REJECT_UNKNOWN_CLIENT_HOSTNAME "sometimes"
+_reject empty_sender_bad      REJECT_EMPTY_SENDER           "YES"
+_reject empty_sender_text_bad REJECT_EMPTY_SENDER_TEXT \
+    $'no sender\n/^.*$/ REJECT everything'
 
 _accept defaults
 _accept explicit_values \
@@ -115,7 +125,16 @@ _accept explicit_values \
     -e SMTP_HARD_ERROR_LIMIT=20 \
     -e POSTFIX_TLS_LOGLEVEL=2 \
     -e POSTFIX_ALLOW_CLEARTEXT_AUTH=no \
-    -e SMTPD_TLS_REQUIRED=yes
+    -e SMTPD_TLS_REQUIRED=yes \
+    -e REJECT_UNKNOWN_SENDER_DOMAIN=yes \
+    -e REJECT_MULTI_RECIPIENT_BOUNCE=yes \
+    -e REJECT_UNLISTED_RECIPIENT=yes \
+    -e SMTPD_DELAY_REJECT=yes \
+    -e DISABLE_VRFY_COMMAND=yes \
+    -e REJECT_UNKNOWN_REVERSE_CLIENT_HOSTNAME=no \
+    -e REJECT_UNKNOWN_CLIENT_HOSTNAME=no \
+    -e REJECT_EMPTY_SENDER=yes \
+    -e REJECT_EMPTY_SENDER_TEXT='Please name a sender'
 
 echo ""
 echo "==> Config validation results: ${PASS} passed, ${FAIL} failed"

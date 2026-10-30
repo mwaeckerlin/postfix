@@ -77,6 +77,9 @@ namespace fs = std::filesystem;
 
 namespace {
 
+constexpr const char *HEADER_CHECKS = "/etc/postfix/header_checks";
+constexpr const char *SENDER_ACCESS = "/etc/postfix/sender_access";
+
 constexpr const char *POSTCONF  = "/usr/sbin/postconf";
 constexpr const char *POSTSUPER = "/usr/sbin/postsuper";
 constexpr const char *MASTER    = "/usr/libexec/postfix/master";
@@ -380,6 +383,187 @@ configure_tls(const std::string &certdomain) {
   }
 }
 
+// Two subject rules, evaluated by cleanup(8) during DATA, before the
+// message is accepted. That is the only place in this stack where a
+// rule about the header refuses delivery without this server sending
+// anything: the sending host keeps the message and its own provider
+// informs the real sender. A rule that runs later, at delivery time,
+// can only answer the address in MAIL FROM, which unwanted mail
+// forges.
+//
+// The first line exempts a MIME-encoded subject (RFC 2047). Postfix
+// matches the raw header and never decodes it (header_checks(5),
+// section BUGS: «when message headers are encoded (RFC 2047) then the
+// rules need to be specified for the encoded form»), so a subject in
+// Cyrillic, Arabic or Chinese, and a German one with umlauts, arrives
+// as `=?UTF-8?B?…?=`. A rule about capital letters says nothing about
+// base64, so those subjects are let through before the rules below
+// ever see them.
+//
+// The shouting rule demands at least one capital Latin letter and no
+// lowercase one. A subject in a script without capital letters carries
+// no [A-Z] and is not matched.
+void
+write_header_checks() {
+  const std::string shouting = env_or("REJECT_SHOUTING_SUBJECT", "yes");
+  const std::string empty    = env_or("REJECT_EMPTY_SUBJECT",    "yes");
+  const std::string shouting_text =
+      env_or("REJECT_SHOUTING_SUBJECT_TEXT",
+             "Subject does not seem to be reasonable, looks like SPAM");
+  const std::string empty_text =
+      env_or("REJECT_EMPTY_SUBJECT_TEXT",
+             "Empty subject not accepted, please specify a subject");
+
+  if (shouting != "yes" && shouting != "no")
+    die_invalid("REJECT_SHOUTING_SUBJECT", shouting);
+  if (empty != "yes" && empty != "no")
+    die_invalid("REJECT_EMPTY_SUBJECT", empty);
+  // The text is rendered into a line of the map file; a newline there
+  // would add a rule of its own.
+  check_chars("REJECT_SHOUTING_SUBJECT_TEXT", shouting_text, " .,;:!?()'\"/-_@");
+  check_chars("REJECT_EMPTY_SUBJECT_TEXT",    empty_text,    " .,;:!?()'\"/-_@");
+
+  if (shouting == "no" && empty == "no") {
+    postconf_set("header_checks", "");
+    std::cerr << "**** subject header checks disabled" << std::endl;
+    return;
+  }
+
+  std::ofstream out(HEADER_CHECKS, std::ios::trunc);
+  if (!out) throw std::runtime_error("cannot write " + std::string(HEADER_CHECKS));
+  out << "# Written by the postfix init from REJECT_SHOUTING_SUBJECT,\n"
+         "# REJECT_EMPTY_SUBJECT and their _TEXT variables. Edits are\n"
+         "# overwritten on every container start.\n"
+         "\n"
+         "# A MIME-encoded subject carries base64 or quoted-printable,\n"
+         "# so no rule about letter case applies to it.\n"
+         "/^Subject:[[:space:]]*=\\?/   DUNNO\n";
+  if (shouting == "yes")
+    out << "\n# At least one capital Latin letter and no lowercase one.\n"
+        << "/^Subject:[^a-z]*[A-Z][^a-z]*$/   REJECT " << shouting_text << "\n";
+  if (empty == "yes")
+    out << "\n# A Subject header that is present and carries nothing.\n"
+        << "/^Subject:[[:space:]]*$/   REJECT " << empty_text << "\n";
+  out.close();
+
+  postconf_set("header_checks", std::string("regexp:") + HEADER_CHECKS);
+  std::cerr << "**** subject header checks: shouting=" << shouting
+            << ", empty=" << empty << std::endl;
+}
+
+// yes / no, with a clear abort on anything else.
+bool
+flag(const char *var, const char *fallback) {
+  const std::string value = env_or(var, fallback);
+  if (value != "yes" && value != "no") die_invalid(var, value);
+  return value == "yes";
+}
+
+// Add a check to a restriction list, once, in front of the first
+// blocklist lookup of that list: a check on the envelope itself costs
+// nothing, a blocklist lookup costs a DNS query, and postfix stops at
+// the first check that rejects.
+void
+insert_restriction(const char *param, const std::string &check) {
+  const std::string current = postconf_get(param);
+  if (current.find(check) != std::string::npos) return;
+  if (current.empty()) {
+    postconf_set(param, check);
+    return;
+  }
+  std::vector<std::string> items;
+  bool placed = false;
+  std::istringstream in(current);
+  std::string item;
+  while (std::getline(in, item, ',')) {
+    item = trim(item);
+    if (item.empty()) continue;
+    const std::string kind = item.substr(0, item.find_first_of(" \t"));
+    if (!placed && (kind == "reject_rbl_client" ||
+                    kind.rfind("reject_rhsbl_", 0) == 0)) {
+      items.push_back(check);
+      placed = true;
+    }
+    items.push_back(item);
+  }
+  if (!placed) items.push_back(check);
+  std::string joined;
+  for (const auto &i : items) joined += (joined.empty() ? "" : ", ") + i;
+  postconf_set(param, joined);
+}
+
+// Plausibility of the envelope, each one a switch. The two that reject
+// on the client's own DNS are off by default: a sender whose provider
+// keeps no reverse record is a legitimate sender, and the big providers
+// accept him too. So is the empty envelope sender, which RFC 5321 gives
+// every bounce.
+void
+configure_plausibility() {
+  const bool sender_domain = flag("REJECT_UNKNOWN_SENDER_DOMAIN",      "yes");
+  const bool bounce        = flag("REJECT_MULTI_RECIPIENT_BOUNCE",     "yes");
+  const bool unlisted      = flag("REJECT_UNLISTED_RECIPIENT",         "yes");
+  const bool delay         = flag("SMTPD_DELAY_REJECT",                "yes");
+  const bool vrfy          = flag("DISABLE_VRFY_COMMAND",              "yes");
+  const bool reverse       = flag("REJECT_UNKNOWN_REVERSE_CLIENT_HOSTNAME", "no");
+  const bool client        = flag("REJECT_UNKNOWN_CLIENT_HOSTNAME",    "no");
+  const bool empty_sender  = flag("REJECT_EMPTY_SENDER",               "no");
+  const std::string empty_sender_text =
+      env_or("REJECT_EMPTY_SENDER_TEXT",
+             "Empty envelope sender not accepted");
+  check_chars("REJECT_EMPTY_SENDER_TEXT", empty_sender_text,
+              " .,;:!?()'\"/-_@");
+
+  // A sender domain without an A or MX record cannot receive the
+  // answer to its own mail. postfix answers 450 while DNS itself is
+  // unreachable, so a resolver outage defers instead of rejecting.
+  if (sender_domain)
+    insert_restriction("smtpd_sender_restrictions",
+                       "reject_unknown_sender_domain");
+  // A bounce carries exactly one recipient; several name a forged one.
+  if (bounce)
+    insert_restriction("smtpd_recipient_restrictions",
+                       "reject_multi_recipient_bounce");
+  if (reverse)
+    insert_restriction("smtpd_client_restrictions",
+                       "reject_unknown_reverse_client_hostname");
+  if (client)
+    insert_restriction("smtpd_client_restrictions",
+                       "reject_unknown_client_hostname");
+
+  // The envelope sender of a bounce is empty by RFC 5321, so a stack
+  // that refuses it never learns that its own mail bounced.
+  if (empty_sender) {
+    std::ofstream out(SENDER_ACCESS, std::ios::trunc);
+    if (!out)
+      throw std::runtime_error("cannot write " + std::string(SENDER_ACCESS));
+    out << "# Written by the postfix init from REJECT_EMPTY_SENDER and\n"
+           "# REJECT_EMPTY_SENDER_TEXT. Edits are overwritten on every\n"
+           "# container start.\n"
+           "\n"
+           "# smtpd_null_access_lookup_key: postfix looks the empty\n"
+           "# envelope sender up as <>.\n"
+        << "/^<>$/   REJECT " << empty_sender_text << "\n";
+    out.close();
+    insert_restriction("smtpd_sender_restrictions",
+                       std::string("check_sender_access regexp:")
+                           + SENDER_ACCESS);
+  }
+
+  postconf_set("smtpd_reject_unlisted_recipient", unlisted ? "yes" : "no");
+  postconf_set("smtpd_delay_reject",              delay    ? "yes" : "no");
+  postconf_set("disable_vrfy_command",            vrfy     ? "yes" : "no");
+
+  const auto word = [](bool on) { return on ? "yes" : "no"; };
+  std::cerr << "**** plausibility: sender_domain=" << word(sender_domain)
+            << ", multi_recipient_bounce=" << word(bounce)
+            << ", unlisted_recipient=" << word(unlisted)
+            << ", delay_reject=" << word(delay)
+            << ", vrfy_disabled=" << word(vrfy)
+            << ", unknown_reverse_client=" << word(reverse)
+            << ", unknown_client=" << word(client)
+            << ", empty_sender_rejected=" << word(empty_sender) << std::endl;
+}
+
 void
 configure_limits() {
   const std::string size = env_or("MESSAGE_SIZE_LIMIT",    "107374182400");
@@ -466,8 +650,11 @@ int main(int argc, char *argv[]) try {
   if (milter_action != "accept" && milter_action != "reject" &&
       milter_action != "tempfail" && milter_action != "quarantine")
     die_invalid("MILTER_DEFAULT_ACTION", milter_action);
-  check_chars("DNSBL_SERVERS", dnsbl, ".- ");
-  check_chars("RHSBL_SERVERS", rhsbl, ".- ");
+  // A zone may carry the return codes that mean a listing, as
+  // `zone=127.0.0.[2..11]`, so an error answer of the list is not read
+  // as one. See the comment at the built-in zones in the Dockerfile.
+  check_chars("DNSBL_SERVERS", dnsbl, ".-=[] ");
+  check_chars("RHSBL_SERVERS", rhsbl, ".-=[] ");
   check_num("MESSAGE_SIZE_LIMIT",
             env_or("MESSAGE_SIZE_LIMIT", "107374182400"), 0, 999999999999999L);
   check_num("SMTP_HARD_ERROR_LIMIT",
@@ -479,6 +666,19 @@ int main(int argc, char *argv[]) try {
   const std::string require_tls = env_or("SMTPD_TLS_REQUIRED", "no");
   if (require_tls != "yes" && require_tls != "no")
     die_invalid("SMTPD_TLS_REQUIRED", require_tls);
+  // A malformed plausibility switch stops the start here, before a
+  // single postconf call, like every other knob.
+  for (const char *var : {"REJECT_UNKNOWN_SENDER_DOMAIN",
+                          "REJECT_MULTI_RECIPIENT_BOUNCE",
+                          "REJECT_UNLISTED_RECIPIENT",
+                          "SMTPD_DELAY_REJECT",
+                          "DISABLE_VRFY_COMMAND",
+                          "REJECT_UNKNOWN_REVERSE_CLIENT_HOSTNAME",
+                          "REJECT_UNKNOWN_CLIENT_HOSTNAME",
+                          "REJECT_EMPTY_SENDER"})
+    flag(var, "no");
+  check_chars("REJECT_EMPTY_SENDER_TEXT",
+              env_or("REJECT_EMPTY_SENDER_TEXT", ""), " .,;:!?()'\"/-_@");
 
   if (argc > 1 && std::string(argv[1]) == "--healthcheck")
     return tcp_probe("127.0.0.1", 25);
@@ -528,6 +728,8 @@ int main(int argc, char *argv[]) try {
   postconf_set("mydomain",   domain);
 
   configure_limits();
+  configure_plausibility();
+  write_header_checks();
 
   // TLS handshake logging: production default 0; diagnostics override
   // for test stacks (never bake a debug loglevel into the image).

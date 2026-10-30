@@ -88,12 +88,34 @@ RUN postconf -P smtps/inet/smtpd_relay_restrictions=permit_sasl_authenticated,re
 # defaults.
 
 # antispam
+# Every blocklist rule names the codes that mean a listing. Spamhaus
+# answers 127.255.255.252, .254 and .255 when a query cannot be
+# answered: a typing error in the zone name, a query through a public or
+# open resolver, too many queries. Postfix counts every answer from the
+# zone as a listing unless the rule says otherwise, so a server whose
+# lookups fail rejects the mail it could not check. Measured in a
+# production log on 2026-10-28: «554 5.7.1 … blocked using
+# dbl.spamhaus.org; Error: open resolver». Spamhaus warns about exactly
+# this in its DNSBL usage FAQ: «some mail servers wrongly reject all
+# mail on these codes». Listings live in 127.0.0.2 … 127.0.0.11 for the
+# IP zones and in 127.0.1.0/24 for the domain zone.
+
+# The parent images are relays: they exist to accept mail from the
+# private networks of a stack, so they carry
+# `mynetworks = 127.0.0.1/32 192.168.0.0/16 172.16.0.0/12 10.0.0.0/8`.
+# A mail server inherits that and lets every host of those ranges relay
+# to any recipient without a password. The overlay networks of a docker
+# swarm live in 10.0.0.0/8, so on a swarm that is every container of
+# every stack. Narrow it here; MYNETWORKS opens it again for whoever
+# needs it, and an own user authenticates instead.
+RUN postconf -e 'mynetworks = 127.0.0.1/32'
+
 RUN postconf -e 'smtpd_helo_required = yes'
 RUN postconf -e 'smtpd_helo_restrictions = permit_sasl_authenticated, permit_mynetworks, reject_invalid_hostname, reject_non_fqdn_hostname, reject_unauth_pipelining'
 RUN postconf -e 'smtpd_sender_restrictions = permit_sasl_authenticated, permit_mynetworks, reject_non_fqdn_sender, reject_unauth_pipelining'
-RUN postconf -e 'smtpd_recipient_restrictions = permit_sasl_authenticated, permit_mynetworks, reject_unknown_recipient_domain, reject_non_fqdn_recipient, reject_unauth_pipelining, reject_rbl_client ix.dnsbl.manitu.net, reject_rbl_client sbl.spamhaus.org, reject_rbl_client xbl.spamhaus.org'
-RUN postconf -e 'smtpd_client_restrictions = permit_sasl_authenticated, reject_invalid_hostname, reject_rhsbl_sender dbl.spamhaus.org, reject_rhsbl_client dbl.spamhaus.org, reject_rhsbl_helo dbl.spamhaus.org'
-RUN postconf -e 'smtpd_relay_restrictions = permit_sasl_authenticated, reject_unknown_recipient_domain, reject_non_fqdn_recipient, reject_unauth_pipelining, reject_unauth_destination, reject_rbl_client ix.dnsbl.manitu.net, reject_rbl_client sbl.spamhaus.org, reject_rbl_client xbl.spamhaus.org'
+RUN postconf -e 'smtpd_recipient_restrictions = permit_sasl_authenticated, permit_mynetworks, reject_unknown_recipient_domain, reject_non_fqdn_recipient, reject_unauth_pipelining, reject_rbl_client ix.dnsbl.manitu.net=127.0.0.[2..11], reject_rbl_client sbl.spamhaus.org=127.0.0.[2..11], reject_rbl_client xbl.spamhaus.org=127.0.0.[2..11]'
+RUN postconf -e 'smtpd_client_restrictions = permit_sasl_authenticated, reject_invalid_hostname, reject_rhsbl_sender dbl.spamhaus.org=127.0.1.[2..99], reject_rhsbl_client dbl.spamhaus.org=127.0.1.[2..99], reject_rhsbl_helo dbl.spamhaus.org=127.0.1.[2..99]'
+RUN postconf -e 'smtpd_relay_restrictions = permit_sasl_authenticated, reject_unknown_recipient_domain, reject_non_fqdn_recipient, reject_unauth_pipelining, reject_unauth_destination, reject_rbl_client ix.dnsbl.manitu.net=127.0.0.[2..11], reject_rbl_client sbl.spamhaus.org=127.0.0.[2..11], reject_rbl_client xbl.spamhaus.org=127.0.0.[2..11]'
 
 COPY --chown=root:postfix \
     mysql_virtual_alias_domain_catchall_maps.cf \
