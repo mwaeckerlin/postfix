@@ -1,12 +1,12 @@
 {
   "name": "@mwaeckerlin/postfix",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "scripts": {
     "build": "docker compose build",
     "start": "docker compose up --build --force-recreate --remove-orphans",
     "start:daemon": "docker compose up -d --build --force-recreate --remove-orphans",
     "stop": "docker compose down",
     "deploy": "docker compose push",
-    "test": "bash tests/image-contract.sh mwaeckerlin/postfix"
+    "test": "docker compose build --quiet && bash tests/image-contract.sh mwaeckerlin/postfix"
   }
 }
